@@ -143,24 +143,27 @@ function App() {
     try {
       const response = await fetch(gasUrl, {
         method: 'POST',
-        mode: 'no-cors', // Apps Script web app returns redirect which client handles as opaque
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'text/plain'
         },
         body: JSON.stringify(payload)
       });
 
-      // Since mode is 'no-cors', we might get an opaque response (status 0).
-      // If fetch doesn't throw, we assume it successfully reached GAS.
-      showToast('success', `記帳成功：$${numericAmount} [${selectedCategory}]`);
-      
-      // Reset input form
-      setAmount('0');
-      setSelectedCategory(null);
-      setRemarks('');
+      const result = await response.json();
+
+      if (result.success) {
+        showToast('success', `記帳成功：$${numericAmount} [${selectedCategory}]`);
+        
+        // Reset input form only on successful server write
+        setAmount('0');
+        setSelectedCategory(null);
+        setRemarks('');
+      } else {
+        showToast('error', `記帳失敗：${result.error || '請檢查安全密碼'}`);
+      }
     } catch (err) {
       console.error(err);
-      showToast('error', '連線失敗，請檢查 API 網址或密碼！');
+      showToast('error', '連線失敗，請確認 API 網址或密碼是否正確！');
     } finally {
       setLoading(false);
     }

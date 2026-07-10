@@ -1,11 +1,11 @@
 /**
- * Sheeto - Google Apps Script Backend
+ * Sheeto - Google Apps Script Backend (Refactored)
  * 
  * Instructions:
  * 1. Open your Google Sheet in a browser.
  * 2. Click on "Extensions" -> "Apps Script".
  * 3. Delete any default code and paste this file.
- * 4. Run `setupSheet()` once to configure the sheets and J column formulas (July 2026).
+ * 4. Run `setupSheet()` once to configure the sheets and automatically scan & set formula.
  * 5. Set the Passcode: Click the gear icon (Project Settings), scroll to "Script Properties",
  *    and add a property with Name "PASSCODE" and your secret value (e.g., "1234").
  * 6. Click "Deploy" -> "New deployment" -> Select type "Web app".
@@ -18,9 +18,25 @@
 const LOG_SHEET_NAME = "2026記帳明細";
 const SUMMARY_SHEET_NAME = "2026滿月記帳";
 
+// Categories matching App.jsx and Column C row labels
+const CATEGORIES_LIST = [
+  "餐費",
+  "咖啡飲料",
+  "衣服鞋子美容保養",
+  "運輸交通",
+  "居家生活用品",
+  "醫療/保健",
+  "健身運動/按摩",
+  "休閒娛樂",
+  "3C/電子產品",
+  "公益",
+  "其他"
+];
+
 /**
  * Setup function to initialize sheets and formulas.
- * Run this ONCE from the Apps Script editor.
+ * Scans Column C dynamically to avoid hardcoding row numbers,
+ * and sets up dynamic SUMIFS formulas that automatically handle months (Jul-Dec) and years.
  */
 function setupSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -46,37 +62,38 @@ function setupSheet() {
     Logger.log("Sheet tab already exists: " + LOG_SHEET_NAME);
   }
   
-  // 2. Set up SUMIFS formulas in 2026滿月記帳 (Column J for July 2026)
+  // 2. Set up dynamic SUMIFS formulas in 2026滿月記帳
   const summarySheet = ss.getSheetByName(SUMMARY_SHEET_NAME);
   if (summarySheet) {
-    // Mapping of Row Number -> Category Name based on the user's spreadsheet structure
-    const categories = {
-      33: "餐費",
-      34: "咖啡飲料",
-      35: "衣服鞋子美容保養",
-      36: "運輸交通",
-      37: "居家生活用品",
-      38: "醫療/保健",
-      39: "健身運動/按摩",
-      40: "休閒娛樂",
-      41: "3C/電子產品",
-      42: "公益",
-      43: "其他"
-    };
+    // Read Column C values to dynamically match rows
+    const lastRow = summarySheet.getLastRow();
+    const cColumnValues = summarySheet.getRange(1, 3, lastRow, 1).getValues(); // Column 3 is Col C
     
     // Column J represents July (Column index 10)
     const colJuly = 10;
+    let formulasSetCount = 0;
     
-    for (const rowStr in categories) {
-      const row = parseInt(rowStr, 10);
-      const categoryName = categories[row];
-      const cell = summarySheet.getRange(row, colJuly);
+    for (let i = 0; i < cColumnValues.length; i++) {
+      const cellValue = cColumnValues[i][0].toString().trim();
+      const rowNum = i + 1;
       
-      // SUMIFS(Sum_Range, Date_Range, ">=Start_Date", Date_Range, "<=End_Date", Category_Range, "Category_Name")
-      const formula = `=SUMIFS('${LOG_SHEET_NAME}'!C:C, '${LOG_SHEET_NAME}'!A:A, ">=2026-07-01", '${LOG_SHEET_NAME}'!A:A, "<=2026-07-31", '${LOG_SHEET_NAME}'!B:B, "${categoryName}")`;
-      cell.setFormula(formula);
+      // If the row category matches our known categories
+      if (CATEGORIES_LIST.indexOf(cellValue) !== -1) {
+        const cell = summarySheet.getRange(rowNum, colJuly);
+        
+        // DYNAMIC FORMULA:
+        // - Extracts year from $D$1 (e.g. "2026年" -> 2026)
+        // - Extracts month from header J$2 (e.g. "7月" -> 7)
+        // - Calculates EOMONTH for start and end date boundaries
+        // - Matches category from $C<row>
+        const formula = `=SUMIFS('${LOG_SHEET_NAME}'!$C:$C, '${LOG_SHEET_NAME}'!$A:$A, ">="&DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(J$2, "月", ""), 1), '${LOG_SHEET_NAME}'!$A:$A, "<="&EOMONTH(DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(J$2, "月", ""), 1), 0), '${LOG_SHEET_NAME}'!$B:$B, $C${rowNum})`;
+        
+        cell.setFormula(formula);
+        formulasSetCount++;
+      }
     }
-    Logger.log("Configured July 2026 formulas in " + SUMMARY_SHEET_NAME);
+    
+    Logger.log("Dynamically scanned C column and set " + formulasSetCount + " formulas in " + SUMMARY_SHEET_NAME);
   } else {
     Logger.log("Error: Summary sheet '" + SUMMARY_SHEET_NAME + "' not found.");
   }
@@ -132,14 +149,16 @@ function doPost(e) {
  * Handle preflight OPTIONS request for CORS compatibility
  */
 function doOptions(e) {
-  const output = ContentService.createTextOutput();
-  return output.setMimeType(ContentService.MimeType.TEXT);
+  return ContentService.createTextOutput("")
+    .setMimeType(ContentService.MimeType.TEXT);
 }
 
 /**
- * Helper to build JSON responses with CORS headers enabled
+ * Helper to build JSON responses.
+ * Note: Google Web Apps automatically handles redirection and Access-Control-Allow-Origin: *
+ * when requests are made via simple requests (Content-Type: text/plain).
  */
-function createJsonResponse(data, statusCode) {
+function createJsonResponse(data) {
   const jsonString = JSON.stringify(data);
   return ContentService.createTextOutput(jsonString)
     .setMimeType(ContentService.MimeType.JSON);
