@@ -9,7 +9,7 @@ The user manages personal finance in a Google Sheet file (`理財.xlsx`, specifi
 - Update the monthly column formulas in the `2026滿月記帳` sheet (starting from July 2026) to dynamically aggregate data from the new tab using `=SUMIFS()`.
 - Develop a Google Apps Script (GAS) Web App that exposes a POST API endpoint to validate a simple passcode and append rows to the spreadsheet.
 - Build a responsive, high-performance mobile-first React application using Vite and Vanilla CSS.
-- Deploy the frontend application to Vercel for free, persistent, and secure access.
+- Deploy the frontend application to Zeabur for secure, persistent access.
 
 **Non-Goals:**
 - **Phase 1 Non-Goal**: Displaying the assets dashboard, stocks, funds, or crypto data with Recharts. This is deferred to Phase 2.
@@ -22,8 +22,8 @@ The user manages personal finance in a Google Sheet file (`理財.xlsx`, specifi
 - **Rationale**: Since all data must reside in Google Sheets, Google Apps Script (GAS) is the most efficient and secure way to interact with Google Sheets. By deploying the script as a Web App (executing as "Me", accessible by "Anyone"), we expose an HTTP endpoint that can write to the sheets directly without requiring OAuth 2.0 login on the client device.
 - **Alternatives**: Client-side Google Sheets API integration via Google Identity Services. Rejected because it requires authenticating with Google frequently on mobile, exposing API client keys, and adding UX friction.
 
-### Decision 2: React (Vite) + Vercel for Frontend
-- **Rationale**: Vite provides near-instant reload during development and a highly optimized build. React makes it easy to build dynamic forms, keypads, and layout state. Vercel offers free, production-grade static site hosting with auto-deployment on Git push.
+### Decision 2: React (Vite) + Zeabur for Frontend
+- **Rationale**: Vite provides near-instant reload during development and a highly optimized build. React makes it easy to build dynamic forms, keypads, and layout state. Zeabur offers clean Git-based deployments that automatically rebuild on push, aligning with the user's existing environment.
 - **Alternatives**: Google Apps Script HTML Service. Rejected because GAS HTML service executes inside an iframe on Google domains, leading to slow rendering, URL routing limitations, and poor styling capabilities.
 
 ### Decision 3: Custom Password/Passcode Security
