@@ -30,5 +30,5 @@
 
 ## 6. Verification and Deployment
 
-- [ ] 6.1 Deploy the Vite React app to Zeabur.
-- [ ] 6.2 Conduct a full end-to-end test of logging a transaction from a mobile device and verifying it appears in the spreadsheet.
+- [x] 6.1 Deploy the Vite React app to Zeabur.
+- [x] 6.2 Conduct a full end-to-end test of logging a transaction from a mobile device and verifying it appears in the spreadsheet.
