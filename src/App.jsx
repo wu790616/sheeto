@@ -70,29 +70,27 @@ function App() {
     }, 3500);
   };
 
-  // Keyboard entry handlers
-  const handleKeyPress = (key) => {
-    if (amount.length > 10 && key !== 'backspace' && key !== 'clear') return;
-
-    if (key === 'clear') {
-      setAmount('0');
-    } else if (key === 'backspace') {
-      if (amount.length <= 1) {
+  // Handle native input change with validation
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    // Allow digits and at most one decimal point, max 10 characters
+    if (/^[0-9]*\.?[0-9]*$/.test(val) && val.length <= 10) {
+      if (val === '') {
         setAmount('0');
+      } else if (val.startsWith('0') && val.length > 1 && val[1] !== '.') {
+        // Strip leading zeros
+        setAmount(val.replace(/^0+/, ''));
       } else {
-        setAmount(amount.slice(0, -1));
+        setAmount(val);
       }
-    } else if (key === '.') {
-      if (!amount.includes('.')) {
-        setAmount(amount + '.');
-      }
-    } else {
-      // Numbers
-      if (amount === '0') {
-        setAmount(key);
-      } else {
-        setAmount(amount + key);
-      }
+    }
+  };
+
+  // Handle Enter keypress for submission
+  const handleInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSubmit();
     }
   };
 
@@ -169,54 +167,6 @@ function App() {
     }
   };
 
-  // Physical Keyboard Listener
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // 1. If settings modal is open, do not intercept keyboard events
-      if (showSettings) return;
-      
-      // 2. If the user is currently focusing any text input (remarks, date, settings), do not intercept
-      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
-        return;
-      }
-
-      const { key } = e;
-      
-      // Allow numbers 0-9
-      if (/^[0-9]$/.test(key)) {
-        e.preventDefault();
-        handleKeyPress(key);
-      } 
-      // Allow decimal point
-      else if (key === '.') {
-        e.preventDefault();
-        handleKeyPress('.');
-      } 
-      // Allow Backspace
-      else if (key === 'Backspace') {
-        e.preventDefault();
-        handleKeyPress('backspace');
-      } 
-      // Allow Escape to clear
-      else if (key === 'Escape') {
-        e.preventDefault();
-        handleKeyPress('clear');
-      }
-      // Allow Enter to submit
-      else if (key === 'Enter') {
-        e.preventDefault();
-        if (amount !== '0' && selectedCategory && !loading) {
-          handleSubmit();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [amount, selectedCategory, loading, showSettings]);
-
   return (
     <div className="app-container">
       {/* Toast Notification */}
@@ -248,11 +198,21 @@ function App() {
 
       {/* Amount Display */}
       <div className="amount-display-container glass-panel animate-pop-in">
-        <span className="amount-label">金額 Amount</span>
+        <label className="amount-label" htmlFor="amount-input">金額 Amount</label>
         <div className="amount-value-wrapper">
           <span className="amount-currency">$</span>
-          <span className="amount-value">{amount}</span>
-          <span className="cursor"></span>
+          <input
+            id="amount-input"
+            type="text"
+            inputMode="decimal"
+            pattern="[0-9]*\.?[0-9]*"
+            className="amount-input-field"
+            value={amount === '0' ? '' : amount}
+            placeholder="0"
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            autoFocus
+          />
         </div>
       </div>
 
@@ -323,38 +283,7 @@ function App() {
         </div>
       </main>
 
-      {/* Mobile Custom Keypad */}
-      <div className="keypad-container animate-slide-up">
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
-          <button 
-            key={num} 
-            className="keypad-btn"
-            onClick={() => handleKeyPress(num)}
-          >
-            {num}
-          </button>
-        ))}
-        <button className="keypad-btn action-btn" onClick={() => handleKeyPress('.')}>
-          .
-        </button>
-        <button className="keypad-btn" onClick={() => handleKeyPress('0')}>
-          0
-        </button>
-        <button 
-          className="keypad-btn action-btn" 
-          onClick={() => handleKeyPress('backspace')}
-          style={{ fontSize: '18px' }}
-        >
-          ⌫
-        </button>
-        <button 
-          className="keypad-btn action-btn" 
-          onClick={() => handleKeyPress('clear')}
-          style={{ gridColumn: 'span 3', fontSize: '16px', height: '44px', marginTop: '-4px' }}
-        >
-          清除 Clear
-        </button>
-      </div>
+
 
       {/* Submit Button */}
       <button 
