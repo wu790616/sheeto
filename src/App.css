@@ -106,7 +106,8 @@
 }
 
 .amount-input-field::placeholder {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-secondary);
+  opacity: 0.4;
 }
 
 /* Main Form Area */
@@ -256,9 +257,6 @@
   border-color: var(--secondary);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
 }
-
-
-
 /* Submit Button */
 .submit-btn {
   width: 100%;

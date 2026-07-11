@@ -18,9 +18,13 @@ const CATEGORIES = [
 
 function App() {
   // Config state (saved in localStorage)
-  const [gasUrl, setGasUrl] = useState('');
-  const [passcode, setPasscode] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('sheeto_gas_url') || '');
+  const [passcode, setPasscode] = useState(() => localStorage.getItem('sheeto_passcode') || '');
+  const [showSettings, setShowSettings] = useState(() => {
+    const savedUrl = localStorage.getItem('sheeto_gas_url') || '';
+    const savedPasscode = localStorage.getItem('sheeto_passcode') || '';
+    return !savedUrl || !savedPasscode;
+  });
 
   // Form states
   const [amount, setAmount] = useState('0');
@@ -33,19 +37,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: '' }
 
-  // Load configuration on mount
+  // Set default custom date to today in yyyy-MM-dd format on mount
   useEffect(() => {
-    const savedUrl = localStorage.getItem('sheeto_gas_url') || '';
-    const savedPasscode = localStorage.getItem('sheeto_passcode') || '';
-    setGasUrl(savedUrl);
-    setPasscode(savedPasscode);
-    
-    // Automatically show settings if not configured
-    if (!savedUrl || !savedPasscode) {
-      setShowSettings(true);
-    }
-
-    // Set default custom date to today in yyyy-MM-dd format
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -79,7 +72,8 @@ function App() {
         setAmount('0');
       } else if (val.startsWith('0') && val.length > 1 && val[1] !== '.') {
         // Strip leading zeros
-        setAmount(val.replace(/^0+/, ''));
+        const stripped = val.replace(/^0+/, '');
+        setAmount(stripped || '0');
       } else {
         setAmount(val);
       }
@@ -90,12 +84,16 @@ function App() {
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleSubmit();
+      if (!loading) {
+        handleSubmit();
+      }
     }
   };
 
   // Submit flow
   const handleSubmit = async () => {
+    if (loading) return;
+
     // Basic validation
     const numericAmount = parseFloat(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
@@ -211,7 +209,7 @@ function App() {
             placeholder="0"
             onChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
-            autoFocus
+            autoFocus={!showSettings}
           />
         </div>
       </div>
@@ -282,9 +280,6 @@ function App() {
           />
         </div>
       </main>
-
-
-
       {/* Submit Button */}
       <button 
         className="submit-btn" 
