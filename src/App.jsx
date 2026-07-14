@@ -52,6 +52,12 @@ function App() {
   // Ref to hold the active fetch request's AbortController
   const fetchControllerRef = useRef(null);
 
+  // Ref to keep track of the latest selectedMonth for async callbacks (stale closure prevention)
+  const selectedMonthRef = useRef(selectedMonth);
+  useEffect(() => {
+    selectedMonthRef.current = selectedMonth;
+  }, [selectedMonth]);
+
   // Set default custom date to today in yyyy-MM-dd format on mount
   useEffect(() => {
     const today = new Date();
@@ -240,8 +246,8 @@ function App() {
 
         // Refresh list if the submitted transaction's month matches the currently viewed month
         const submittedMonth = `${yyyy}-${mm}`;
-        if (submittedMonth === selectedMonth) {
-          fetchTransactions(selectedMonth);
+        if (submittedMonth === selectedMonthRef.current) {
+          fetchTransactions(selectedMonthRef.current);
         }
       } else {
         showToast('error', `記帳失敗：${result.error || '請檢查安全密碼'}`);
