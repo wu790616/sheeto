@@ -100,6 +100,78 @@ function setupSheet() {
 }
 
 /**
+ * Handle GET requests from the mobile client
+ */
+function doGet(e) {
+  try {
+    const action = e.parameter.action;
+    const passcode = e.parameter.passcode;
+    const month = e.parameter.month;
+    
+    // 1. Validate passcode
+    const systemPasscode = PropertiesService.getScriptProperties().getProperty("PASSCODE");
+    if (!systemPasscode) {
+      return createJsonResponse({ success: false, error: "System passcode is not configured in Script Properties." });
+    }
+    if (passcode !== systemPasscode) {
+      return createJsonResponse({ success: false, error: "Unauthorized: Invalid passcode." });
+    }
+    
+    // 2. Validate action and month parameters
+    if (action !== "getTransactions") {
+      return createJsonResponse({ success: false, error: "Bad Request: Invalid action." });
+    }
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return createJsonResponse({ success: false, error: "Bad Request: Missing or invalid month parameter. Expected format: YYYY-MM." });
+    }
+    
+    // 3. Query transactions from sheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+    if (!logSheet) {
+      return createJsonResponse({ success: false, error: "Sheet '" + LOG_SHEET_NAME + "' not found. Run setupSheet() first." });
+    }
+    
+    const lastRow = logSheet.getLastRow();
+    const transactions = [];
+    
+    if (lastRow > 1) {
+      const values = logSheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      const tz = Session.getScriptTimeZone();
+      
+      for (let i = 0; i < values.length; i++) {
+        const row = values[i];
+        const dateVal = row[0];
+        let dateObj = dateVal;
+        
+        if (dateObj && !(dateObj instanceof Date)) {
+          dateObj = new Date(dateObj);
+        }
+        
+        if (dateObj instanceof Date && !isNaN(dateObj.getTime())) {
+          const rowMonth = Utilities.formatDate(dateObj, tz, "yyyy-MM");
+          if (rowMonth === month) {
+            transactions.push({
+              date: Utilities.formatDate(dateObj, tz, "yyyy/MM/dd"),
+              category: row[1],
+              amount: parseFloat(row[2]) || 0,
+              remarks: row[3] || ""
+            });
+          }
+        }
+      }
+    }
+    
+    // Sort descending by date (newest first)
+    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    return createJsonResponse({ success: true, transactions: transactions });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+/**
  * Handle POST requests from the mobile client
  */
 function doPost(e) {
