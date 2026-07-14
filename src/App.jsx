@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 // Exact categories matching the spreadsheet rows
@@ -37,6 +37,27 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: '' }
 
+  // Monthly transactions list states
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    return `${yyyy}-${mm}`;
+  });
+  const [transactions, setTransactions] = useState([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
+  const [activeTab, setActiveTab] = useState('log'); // 'log' | 'history'
+
+  // Ref to hold the active fetch request's AbortController
+  const fetchControllerRef = useRef(null);
+
+  // Ref to keep track of the latest selectedMonth for async callbacks (stale closure prevention)
+  const selectedMonthRef = useRef(selectedMonth);
+  useEffect(() => {
+    selectedMonthRef.current = selectedMonth;
+  }, [selectedMonth]);
+
   // Set default custom date to today in yyyy-MM-dd format on mount
   useEffect(() => {
     const today = new Date();
@@ -62,6 +83,74 @@ function App() {
       setToast(null);
     }, 3500);
   };
+
+  // Fetch transactions for the specified month
+  const fetchTransactions = async (monthToFetch) => {
+    if (!gasUrl || !passcode) {
+      setTransactions([]);
+      return;
+    }
+
+    // Abort the previous active request if any
+    if (fetchControllerRef.current) {
+      fetchControllerRef.current.abort();
+    }
+
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+    const signal = controller.signal;
+    
+    setListLoading(true);
+    setFetchError(null);
+    
+    try {
+      const url = `${gasUrl}?action=getTransactions&month=${monthToFetch}&passcode=${encodeURIComponent(passcode)}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal: signal
+      });
+      
+      const result = await response.json();
+      if (!signal.aborted) {
+        if (result.success) {
+          setTransactions(result.transactions || []);
+        } else {
+          setFetchError(result.error || '無法取得明細資料');
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error(err);
+        setFetchError('連線失敗，請確認網路或連線設定！');
+      }
+    } finally {
+      if (!signal.aborted) {
+        setListLoading(false);
+        if (fetchControllerRef.current === controller) {
+          fetchControllerRef.current = null;
+        }
+      }
+    }
+  };
+
+  // Effect to load transactions automatically
+  useEffect(() => {
+    if (gasUrl && passcode) {
+      fetchTransactions(selectedMonth);
+    } else {
+      setTransactions([]);
+    }
+    
+    return () => {
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current.abort();
+      }
+    };
+  }, [selectedMonth, gasUrl, passcode]);
 
   // Handle native input change with validation
   const handleInputChange = (e) => {
@@ -154,6 +243,12 @@ function App() {
         setAmount('0');
         setSelectedCategory(null);
         setRemarks('');
+
+        // Refresh list if the submitted transaction's month matches the currently viewed month
+        const submittedMonth = `${yyyy}-${mm}`;
+        if (submittedMonth === selectedMonthRef.current) {
+          fetchTransactions(selectedMonthRef.current);
+        }
       } else {
         showToast('error', `記帳失敗：${result.error || '請檢查安全密碼'}`);
       }
@@ -194,100 +289,217 @@ function App() {
         </button>
       </header>
 
-      {/* Amount Display */}
-      <div className="amount-display-container glass-panel animate-pop-in">
-        <label className="amount-label" htmlFor="amount-input">金額 Amount</label>
-        <div className="amount-value-wrapper">
-          <span className="amount-currency">$</span>
-          <input
-            id="amount-input"
-            type="text"
-            inputMode="decimal"
-            pattern="[0-9]*\.?[0-9]*"
-            className="amount-input-field"
-            value={amount === '0' ? '' : amount}
-            placeholder="0"
-            onChange={handleInputChange}
-            onKeyDown={handleInputKeyDown}
-            autoFocus={!showSettings}
-          />
-        </div>
-      </div>
-
-      {/* Main card containing Category and Config inputs */}
-      <main className="main-card glass-panel animate-slide-up">
-        {/* Date Selector */}
-        <div>
-          <div className="section-title">📅 日期 Date</div>
-          <div className="date-selector-row">
-            <button 
-              className={`date-pill ${dateMode === 'today' ? 'active' : ''}`}
-              onClick={() => setDateMode('today')}
-            >
-              今天 Today
-            </button>
-            <button 
-              className={`date-pill ${dateMode === 'yesterday' ? 'active' : ''}`}
-              onClick={() => setDateMode('yesterday')}
-            >
-              昨天 Yesterday
-            </button>
-            <button 
-              className={`date-pill ${dateMode === 'custom' ? 'active' : ''}`}
-              onClick={() => setDateMode('custom')}
-            >
-              選擇 Select
-            </button>
-          </div>
-          {dateMode === 'custom' && (
-            <div style={{ marginTop: '8px' }}>
-              <input 
-                type="date" 
-                className="custom-date-picker" 
-                value={customDate}
-                onChange={(e) => setCustomDate(e.target.value)}
+      {/* Tab Content */}
+      {activeTab === 'log' ? (
+        <>
+          {/* Amount Display */}
+          <div className="amount-display-container glass-panel animate-pop-in">
+            <label className="amount-label" htmlFor="amount-input">金額 Amount</label>
+            <div className="amount-value-wrapper">
+              <span className="amount-currency">$</span>
+              <input
+                id="amount-input"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
+                className="amount-input-field"
+                value={amount === '0' ? '' : amount}
+                placeholder="0"
+                onChange={handleInputChange}
+                onKeyDown={handleInputKeyDown}
+                autoFocus={!showSettings}
               />
             </div>
-          )}
-        </div>
-
-        {/* Category Grid */}
-        <div>
-          <div className="section-title">🏷️ 分類 Category</div>
-          <div className="category-grid">
-            {CATEGORIES.map((cat) => (
-              <div 
-                key={cat.id} 
-                className={`category-card ${selectedCategory === cat.name ? 'active' : ''}`}
-                onClick={() => setSelectedCategory(cat.name)}
-              >
-                <span className="category-emoji">{cat.emoji}</span>
-                <span className="category-name">{cat.name}</span>
-              </div>
-            ))}
           </div>
-        </div>
 
-        {/* Remarks Input */}
-        <div>
-          <div className="section-title">✍️ 備註 Remarks (選填)</div>
-          <input 
-            type="text" 
-            placeholder="例如：午餐麥當勞、飲料..." 
-            className="remarks-input"
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-          />
-        </div>
-      </main>
-      {/* Submit Button */}
-      <button 
-        className="submit-btn" 
-        onClick={handleSubmit} 
-        disabled={loading || amount === '0' || !selectedCategory}
-      >
-        {loading ? <div className="spinner" /> : '✓ 送出此筆記帳 Submit'}
-      </button>
+          {/* Main card containing Category and Config inputs */}
+          <main className="main-card glass-panel animate-slide-up">
+            {/* Date Selector */}
+            <div>
+              <div className="section-title">📅 日期 Date</div>
+              <div className="date-selector-row">
+                <button 
+                  className={`date-pill ${dateMode === 'today' ? 'active' : ''}`}
+                  onClick={() => setDateMode('today')}
+                >
+                  今天 Today
+                </button>
+                <button 
+                  className={`date-pill ${dateMode === 'yesterday' ? 'active' : ''}`}
+                  onClick={() => setDateMode('yesterday')}
+                >
+                  昨天 Yesterday
+                </button>
+                <button 
+                  className={`date-pill ${dateMode === 'custom' ? 'active' : ''}`}
+                  onClick={() => setDateMode('custom')}
+                >
+                  選擇 Select
+                </button>
+              </div>
+              {dateMode === 'custom' && (
+                <div style={{ marginTop: '8px' }}>
+                  <input 
+                    type="date" 
+                    className="custom-date-picker" 
+                    value={customDate}
+                    onChange={(e) => setCustomDate(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Category Grid */}
+            <div>
+              <div className="section-title">🏷️ 分類 Category</div>
+              <div className="category-grid">
+                {CATEGORIES.map((cat) => (
+                  <div 
+                    key={cat.id} 
+                    className={`category-card ${selectedCategory === cat.name ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory(cat.name)}
+                  >
+                    <span className="category-emoji">{cat.emoji}</span>
+                    <span className="category-name">{cat.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Remarks Input */}
+            <div>
+              <div className="section-title">✍️ 備註 Remarks (選填)</div>
+              <input 
+                type="text" 
+                placeholder="例如：午餐麥當勞、飲料..." 
+                className="remarks-input"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+              />
+            </div>
+          </main>
+
+          {/* Submit Button */}
+          <button 
+            className="submit-btn" 
+            onClick={handleSubmit} 
+            disabled={loading || amount === '0' || !selectedCategory}
+          >
+            {loading ? <div className="spinner" /> : '✓ 送出此筆記帳 Submit'}
+          </button>
+        </>
+      ) : (
+        /* Monthly Transactions List Card */
+        gasUrl && passcode && (
+          <div className="transactions-card glass-panel animate-slide-up" style={{ width: '100%' }}>
+            <div className="transactions-header">
+              <div className="section-title" style={{ margin: 0 }}>📊 當月明細 Transactions</div>
+              
+              {/* Month Selector */}
+              <select 
+                className="month-dropdown"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+              >
+                {Array.from({ length: 12 }, (_, i) => {
+                  const monthVal = String(i + 1).padStart(2, '0');
+                  const yearVal = new Date().getFullYear();
+                  return (
+                    <option key={monthVal} value={`${yearVal}-${monthVal}`}>
+                      {yearVal}年 {i + 1}月
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Monthly Total */}
+            <div className="monthly-total-summary">
+              <span className="total-label">本月累計金額 Total:</span>
+              <span className="total-amount">
+                ${transactions.reduce((sum, tx) => sum + tx.amount, 0).toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+              </span>
+            </div>
+
+            {/* Loading Indicator / Error Message / Empty State / Table */}
+            {listLoading && transactions.length === 0 ? (
+              <div className="list-loading">
+                <div className="spinner" style={{ marginBottom: '12px' }} />
+                <span>載入明細中...</span>
+              </div>
+            ) : fetchError && transactions.length === 0 ? (
+              <div className="list-error">
+                <span>⚠️ {fetchError}</span>
+                <button className="retry-btn" onClick={() => fetchTransactions(selectedMonth)}>
+                  重試 Retry
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Inline error for background refresh failures when we already have cached transaction data */}
+                {fetchError && (
+                  <div className="list-inline-error">
+                    <span>⚠️ {fetchError}</span>
+                    <button className="retry-btn-inline" onClick={() => fetchTransactions(selectedMonth)}>
+                      重試 Retry
+                    </button>
+                  </div>
+                )}
+
+                {transactions.length === 0 ? (
+                  <div className="empty-state">
+                    <span>🫙 這個月還沒有記帳記錄喔！</span>
+                  </div>
+                ) : (
+                  <div className="transactions-list-wrapper" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                    <table className="transactions-table">
+                      <thead>
+                        <tr>
+                          <th>日期</th>
+                          <th>分類</th>
+                          <th>金額</th>
+                          <th>備註</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transactions.map((tx, idx) => (
+                          <tr key={idx} className="transaction-row">
+                            <td className="tx-date">{tx.date.substring(5)}</td>
+                            <td className="tx-category">
+                              {CATEGORIES.find(c => c.name === tx.category)?.emoji || '💰'} {tx.category}
+                            </td>
+                            <td className="tx-amount">${tx.amount.toFixed(1)}</td>
+                            <td className="tx-remarks" title={tx.remarks}>{tx.remarks || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )
+      )}
+
+      {/* Tab Navigation */}
+      <nav className="tab-navigation">
+        <button 
+          className={`nav-tab ${activeTab === 'log' ? 'active' : ''}`}
+          onClick={() => setActiveTab('log')}
+        >
+          <span className="nav-icon">✍️</span>
+          <span className="nav-label">記帳 Log</span>
+        </button>
+        <button 
+          className={`nav-tab ${activeTab === 'history' ? 'active' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          <span className="nav-icon">📊</span>
+          <span className="nav-label">明細 History</span>
+        </button>
+      </nav>
+
 
       {/* Settings Modal Dialog Overlay */}
       {showSettings && (
