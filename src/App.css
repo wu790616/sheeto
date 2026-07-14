@@ -548,7 +548,7 @@
 }
 
 .transactions-table th {
-  background: rgba(0, 0, 0, 0.2);
+  background: #111827; /* Solid background to prevent scrolling text overlap */
   color: var(--text-secondary);
   font-weight: 600;
   padding: 10px 12px;
