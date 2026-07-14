@@ -26,3 +26,11 @@ The system SHALL provide a "Monthly Transactions" interface displaying recorded 
 #### Scenario: Rapid month switching
 - **WHEN** the user switches to a new month before the fetch for a previously selected month has completed
 - **THEN** the system SHALL discard the stale response and only display data matching the currently selected month.
+
+### Requirement: Tabbed navigation
+The system SHALL provide a tabbed navigation interface allowing the user to switch between the "Log" (記帳) page and the "History" (明細) page.
+
+#### Scenario: Tab switching
+- **WHEN** the user clicks the "明細 History" tab button
+- **THEN** the system SHALL display the monthly transactions interface and keep the navigation bar active at the bottom.
+

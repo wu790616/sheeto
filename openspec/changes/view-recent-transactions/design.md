@@ -43,6 +43,10 @@ To resolve this, we will add read capabilities to Sheeto:
 - **Problem**: If the user switches months quickly, an earlier request (for a previously selected month) may resolve *after* a later request (for the currently selected month), overwriting the UI with stale data.
 - **Decision**: Guard the fetch effect with an `AbortController` (aborting the previous in-flight request when the selected month changes) or a request-sequence check, so only the response matching the currently selected month is ever applied to state.
 
+### 5. Navigation Layout Design
+- **Problem**: Displaying the monthly transaction list directly underneath the log forms on a single page makes the UI cluttered and requires substantial vertical scrolling on small mobile screens.
+- **Decision**: Split the application into two distinct tab views ("Log" and "History") using a sticky bottom navigation bar. This isolates the entry context from the browsing context, keeping the mobile viewport clean and focused.
+
 ## Risks / Trade-offs
 
 - **[Risk] Performance on large sheets**: Scanning all rows of `2026記帳明細` using `getValues()` could slow down if there are tens of thousands of rows.
