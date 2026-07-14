@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 // Exact categories matching the spreadsheet rows
@@ -49,6 +49,9 @@ function App() {
   const [fetchError, setFetchError] = useState(null);
   const [activeTab, setActiveTab] = useState('log'); // 'log' | 'history'
 
+  // Ref to hold the active fetch request's AbortController
+  const fetchControllerRef = useRef(null);
+
   // Set default custom date to today in yyyy-MM-dd format on mount
   useEffect(() => {
     const today = new Date();
@@ -76,11 +79,21 @@ function App() {
   };
 
   // Fetch transactions for the specified month
-  const fetchTransactions = async (monthToFetch, signal = null) => {
+  const fetchTransactions = async (monthToFetch) => {
     if (!gasUrl || !passcode) {
       setTransactions([]);
       return;
     }
+
+    // Abort the previous active request if any
+    if (fetchControllerRef.current) {
+      fetchControllerRef.current.abort();
+    }
+
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+    const signal = controller.signal;
     
     setListLoading(true);
     setFetchError(null);
@@ -96,10 +109,12 @@ function App() {
       });
       
       const result = await response.json();
-      if (result.success) {
-        setTransactions(result.transactions || []);
-      } else {
-        setFetchError(result.error || '無法取得明細資料');
+      if (!signal.aborted) {
+        if (result.success) {
+          setTransactions(result.transactions || []);
+        } else {
+          setFetchError(result.error || '無法取得明細資料');
+        }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -107,24 +122,27 @@ function App() {
         setFetchError('連線失敗，請確認網路或連線設定！');
       }
     } finally {
-      if (!signal || !signal.aborted) {
+      if (!signal.aborted) {
         setListLoading(false);
+        if (fetchControllerRef.current === controller) {
+          fetchControllerRef.current = null;
+        }
       }
     }
   };
 
   // Effect to load transactions automatically
   useEffect(() => {
-    const controller = new AbortController();
-    
     if (gasUrl && passcode) {
-      fetchTransactions(selectedMonth, controller.signal);
+      fetchTransactions(selectedMonth);
     } else {
       setTransactions([]);
     }
     
     return () => {
-      controller.abort();
+      if (fetchControllerRef.current) {
+        fetchControllerRef.current.abort();
+      }
     };
   }, [selectedMonth, gasUrl, passcode]);
 
@@ -403,42 +421,56 @@ function App() {
                 <div className="spinner" style={{ marginBottom: '12px' }} />
                 <span>載入明細中...</span>
               </div>
-            ) : fetchError ? (
+            ) : fetchError && transactions.length === 0 ? (
               <div className="list-error">
                 <span>⚠️ {fetchError}</span>
                 <button className="retry-btn" onClick={() => fetchTransactions(selectedMonth)}>
                   重試 Retry
                 </button>
               </div>
-            ) : transactions.length === 0 ? (
-              <div className="empty-state">
-                <span>🫙 這個月還沒有記帳記錄喔！</span>
-              </div>
             ) : (
-              <div className="transactions-list-wrapper" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                <table className="transactions-table">
-                  <thead>
-                    <tr>
-                      <th>日期</th>
-                      <th>分類</th>
-                      <th>金額</th>
-                      <th>備註</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transactions.map((tx, idx) => (
-                      <tr key={idx} className="transaction-row">
-                        <td className="tx-date">{tx.date.substring(5)}</td>
-                        <td className="tx-category">
-                          {CATEGORIES.find(c => c.name === tx.category)?.emoji || '💰'} {tx.category}
-                        </td>
-                        <td className="tx-amount">${tx.amount.toFixed(1)}</td>
-                        <td className="tx-remarks" title={tx.remarks}>{tx.remarks || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {/* Inline error for background refresh failures when we already have cached transaction data */}
+                {fetchError && (
+                  <div className="list-inline-error">
+                    <span>⚠️ {fetchError}</span>
+                    <button className="retry-btn-inline" onClick={() => fetchTransactions(selectedMonth)}>
+                      重試 Retry
+                    </button>
+                  </div>
+                )}
+
+                {transactions.length === 0 ? (
+                  <div className="empty-state">
+                    <span>🫙 這個月還沒有記帳記錄喔！</span>
+                  </div>
+                ) : (
+                  <div className="transactions-list-wrapper" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                    <table className="transactions-table">
+                      <thead>
+                        <tr>
+                          <th>日期</th>
+                          <th>分類</th>
+                          <th>金額</th>
+                          <th>備註</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transactions.map((tx, idx) => (
+                          <tr key={idx} className="transaction-row">
+                            <td className="tx-date">{tx.date.substring(5)}</td>
+                            <td className="tx-category">
+                              {CATEGORIES.find(c => c.name === tx.category)?.emoji || '💰'} {tx.category}
+                            </td>
+                            <td className="tx-amount">${tx.amount.toFixed(1)}</td>
+                            <td className="tx-remarks" title={tx.remarks}>{tx.remarks || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )
