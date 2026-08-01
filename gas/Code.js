@@ -36,7 +36,7 @@ const CATEGORIES_LIST = [
 /**
  * Setup function to initialize sheets and formulas.
  * Scans Column C dynamically to avoid hardcoding row numbers,
- * and sets up dynamic SUMIFS formulas that automatically handle months (Jul-Dec) and years.
+ * and sets up dynamic SUMIFS formulas for all month columns (e.g. 1月~12月, including 8月).
  */
 function setupSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -62,41 +62,66 @@ function setupSheet() {
     Logger.log("Sheet tab already exists: " + LOG_SHEET_NAME);
   }
   
-  // 2. Set up dynamic SUMIFS formulas in 2026滿月記帳
+  // 2. Set up dynamic SUMIFS formulas in 2026滿月記帳 for all month columns
   const summarySheet = ss.getSheetByName(SUMMARY_SHEET_NAME);
   if (summarySheet) {
     // Read Column C values to dynamically match rows
     const lastRow = summarySheet.getLastRow();
+    const lastCol = summarySheet.getLastColumn();
     const cColumnValues = summarySheet.getRange(1, 3, lastRow, 1).getValues(); // Column 3 is Col C
     
-    // Column J represents July (Column index 10)
-    const colJuly = 10;
+    // Read Row 2 headers to find all month columns (e.g. "1月", "2月", ..., "12月")
+    const row2Values = summarySheet.getRange(2, 1, 1, lastCol).getValues()[0];
+    
     let formulasSetCount = 0;
     
-    for (let i = 0; i < cColumnValues.length; i++) {
-      const cellValue = cColumnValues[i][0].toString().trim();
-      const rowNum = i + 1;
+    for (let col = 1; col <= lastCol; col++) {
+      const headerVal = row2Values[col - 1].toString().trim();
       
-      // If the row category matches our known categories
-      if (CATEGORIES_LIST.indexOf(cellValue) !== -1) {
-        const cell = summarySheet.getRange(rowNum, colJuly);
+      // If the row 2 header matches month pattern and is 7月 or later (>= 7)
+      const monthMatch = headerVal.match(/^(\d+)月$/);
+      if (monthMatch && parseInt(monthMatch[1], 10) >= 7) {
+        const colLetter = getColumnLetter(col);
         
-        // DYNAMIC FORMULA:
-        // - Extracts year from $D$1 (e.g. "2026年" -> 2026)
-        // - Extracts month from header J$2 (e.g. "7月" -> 7)
-        // - Calculates EOMONTH for start and end date boundaries
-        // - Matches category from $C<row>
-        const formula = `=SUMIFS('${LOG_SHEET_NAME}'!$C:$C, '${LOG_SHEET_NAME}'!$A:$A, ">="&DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(J$2, "月", ""), 1), '${LOG_SHEET_NAME}'!$A:$A, "<="&EOMONTH(DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(J$2, "月", ""), 1), 0), '${LOG_SHEET_NAME}'!$B:$B, $C${rowNum})`;
-        
-        cell.setFormula(formula);
-        formulasSetCount++;
+        for (let i = 0; i < cColumnValues.length; i++) {
+          const cellValue = cColumnValues[i][0].toString().trim();
+          const rowNum = i + 1;
+          
+          // If the row category matches our known categories
+          if (CATEGORIES_LIST.indexOf(cellValue) !== -1) {
+            const cell = summarySheet.getRange(rowNum, col);
+            
+            // DYNAMIC FORMULA:
+            // - Extracts year from $D$1 (e.g. "2026年" -> 2026)
+            // - Extracts month from header <Col>$2 (e.g. "8月" -> 8)
+            // - Calculates EOMONTH for start and end date boundaries
+            // - Matches category from $C<row>
+            const formula = `=SUMIFS('${LOG_SHEET_NAME}'!$C:$C, '${LOG_SHEET_NAME}'!$A:$A, ">="&DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(${colLetter}$2, "月", ""), 1), '${LOG_SHEET_NAME}'!$A:$A, "<="&EOMONTH(DATE(VALUE(SUBSTITUTE($D$1, "年", "")), SUBSTITUTE(${colLetter}$2, "月", ""), 1), 0), '${LOG_SHEET_NAME}'!$B:$B, $C${rowNum})`;
+            
+            cell.setFormula(formula);
+            formulasSetCount++;
+          }
+        }
       }
     }
     
-    Logger.log("Dynamically scanned C column and set " + formulasSetCount + " formulas in " + SUMMARY_SHEET_NAME);
+    Logger.log("Dynamically scanned C column and month headers, set " + formulasSetCount + " formulas in " + SUMMARY_SHEET_NAME);
   } else {
     Logger.log("Error: Summary sheet '" + SUMMARY_SHEET_NAME + "' not found.");
   }
+}
+
+/**
+ * Helper function to convert 1-based column index to column letter (1 -> A, 4 -> D, 10 -> J, 11 -> K, etc.)
+ */
+function getColumnLetter(colIndex) {
+  let temp, letter = '';
+  while (colIndex > 0) {
+    temp = (colIndex - 1) % 26;
+    letter = String.fromCharCode(65 + temp) + letter;
+    colIndex = Math.floor((colIndex - temp) / 26);
+  }
+  return letter;
 }
 
 /**
