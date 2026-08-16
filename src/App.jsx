@@ -1,20 +1,184 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './App.css';
 
-// Exact categories matching the spreadsheet rows
+// Exact categories matching the spreadsheet rows with dedicated vibrant dark-mode colors
 const CATEGORIES = [
-  { id: 'meals', name: '餐費', emoji: '🍔' },
-  { id: 'coffee', name: '咖啡飲料', emoji: '☕' },
-  { id: 'beauty', name: '衣服鞋子美容保養', emoji: '🛍️' },
-  { id: 'transport', name: '運輸交通', emoji: '🚗' },
-  { id: 'household', name: '居家生活用品', emoji: '🏠' },
-  { id: 'medical', name: '醫療/保健', emoji: '💊' },
-  { id: 'fitness', name: '健身運動/按摩', emoji: '🏋️' },
-  { id: 'entertainment', name: '休閒娛樂', emoji: '🎬' },
-  { id: 'digital', name: '3C/電子產品', emoji: '💻' },
-  { id: 'charity', name: '公益', emoji: '❤️' },
-  { id: 'others', name: '其他', emoji: '➕' }
+  { id: 'meals', name: '餐費', emoji: '🍔', color: '#f97316' },
+  { id: 'coffee', name: '咖啡飲料', emoji: '☕', color: '#d97706' },
+  { id: 'beauty', name: '衣服鞋子美容保養', emoji: '🛍️', color: '#ec4899' },
+  { id: 'transport', name: '運輸交通', emoji: '🚗', color: '#3b82f6' },
+  { id: 'household', name: '居家生活用品', emoji: '🏠', color: '#10b981' },
+  { id: 'medical', name: '醫療/保健', emoji: '💊', color: '#ef4444' },
+  { id: 'fitness', name: '健身運動/按摩', emoji: '🏋️', color: '#8b5cf6' },
+  { id: 'entertainment', name: '休閒娛樂', emoji: '🎬', color: '#06b6d4' },
+  { id: 'digital', name: '3C/電子產品', emoji: '💻', color: '#6366f1' },
+  { id: 'charity', name: '公益', emoji: '❤️', color: '#f43f5e' },
+  { id: 'others', name: '其他', emoji: '➕', color: '#94a3b8' }
 ];
+
+const FALLBACK_CATEGORY = {
+  id: 'unmatched',
+  name: '其他',
+  emoji: '💰',
+  color: '#94a3b8'
+};
+
+const getCategoryMeta = (categoryName) => {
+  return CATEGORIES.find(c => c.name === categoryName) || {
+    ...FALLBACK_CATEGORY,
+    name: categoryName || '其他'
+  };
+};
+
+function ExpenseDonutChart({ breakdown, totalAmount, activeCategory, onSelectCategory }) {
+  const size = 180;
+  const strokeWidth = 18;
+  const radius = (size - strokeWidth) / 2; // 81
+  const circumference = 2 * Math.PI * radius; // ~508.938
+
+  const activeItem = breakdown.find((item) => item.name === activeCategory);
+
+  let accumulatedPercent = 0;
+
+  return (
+    <div className="donut-chart-container">
+      <div className="donut-chart-svg-wrapper">
+        <svg 
+          width={size} 
+          height={size} 
+          viewBox={`0 0 ${size} ${size}`} 
+          className="donut-chart-svg"
+        >
+          {/* Background circle track */}
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="rgba(255, 255, 255, 0.06)"
+            strokeWidth={strokeWidth}
+          />
+          {/* Slices */}
+          {breakdown.map((item) => {
+            const strokeDash = (item.percentage / 100) * circumference;
+            const gap = breakdown.length > 1 ? 2.5 : 0;
+            const visibleDash = Math.max(0.5, strokeDash - gap);
+            const offset = (accumulatedPercent / 100) * circumference;
+            accumulatedPercent += item.percentage;
+
+            const isSelected = activeCategory === item.name;
+            const isDimmed = activeCategory && !isSelected;
+
+            return (
+              <circle
+                key={item.name}
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                fill="none"
+                stroke={item.color}
+                strokeWidth={isSelected ? strokeWidth + 4 : strokeWidth}
+                strokeDasharray={`${visibleDash} ${circumference - visibleDash}`}
+                strokeDashoffset={-offset}
+                strokeLinecap="round"
+                className={`donut-segment ${isSelected ? 'active' : ''} ${isDimmed ? 'dimmed' : ''}`}
+                onClick={() => onSelectCategory(isSelected ? null : item.name)}
+                style={{
+                  transformOrigin: '50% 50%',
+                  transform: 'rotate(-90deg)',
+                  transition: 'all 0.25s ease',
+                  cursor: 'pointer'
+                }}
+              />
+            );
+          })}
+        </svg>
+
+        {/* Center Content */}
+        <div 
+          className={`donut-center-content ${activeCategory ? 'has-active' : ''}`}
+          onClick={() => activeCategory && onSelectCategory(null)}
+          title={activeCategory ? "點擊以清除選取" : undefined}
+          style={{ cursor: activeCategory ? 'pointer' : 'default' }}
+        >
+          {activeItem ? (
+            <>
+              <span className="donut-center-emoji">{activeItem.emoji}</span>
+              <span className="donut-center-name">{activeItem.name}</span>
+              <span className="donut-center-amount">
+                ${activeItem.amount.toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+              </span>
+              <span className="donut-center-percentage">
+                {activeItem.percentageFormatted}%
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="donut-center-label">本月支出 Total</span>
+              <span className="donut-center-amount">
+                ${totalAmount.toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+              </span>
+              <span className="donut-center-count">
+                {breakdown.length} 個分類
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryBreakdownList({ breakdown, activeCategory, onSelectCategory }) {
+  return (
+    <div className="category-breakdown-list">
+      {breakdown.map((item) => {
+        const isSelected = activeCategory === item.name;
+        return (
+          <div
+            key={item.name}
+            className={`breakdown-item ${isSelected ? 'active' : ''}`}
+            onClick={() => onSelectCategory(isSelected ? null : item.name)}
+          >
+            <div className="breakdown-item-main">
+              <div className="breakdown-item-left">
+                <span className="breakdown-color-dot" style={{ backgroundColor: item.color }} />
+                <span className="breakdown-emoji">{item.emoji}</span>
+                <span className="breakdown-name">{item.name}</span>
+                <span className="breakdown-count">({item.count}筆)</span>
+              </div>
+              <div className="breakdown-item-right">
+                <span className="breakdown-amount">
+                  ${item.amount.toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </span>
+                <span 
+                  className="breakdown-percentage" 
+                  style={{ 
+                    color: item.color,
+                    borderColor: `${item.color}40`,
+                    background: `${item.color}15`
+                  }}
+                >
+                  {item.percentageFormatted}%
+                </span>
+              </div>
+            </div>
+            {/* Progress Bar Track */}
+            <div className="breakdown-progress-track">
+              <div
+                className="breakdown-progress-fill"
+                style={{
+                  width: `${Math.min(100, Math.max(2, item.percentage))}%`,
+                  backgroundColor: item.color
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function App() {
   // Config state (saved in localStorage)
@@ -48,6 +212,50 @@ function App() {
   const [listLoading, setListLoading] = useState(false);
   const [fetchError, setFetchError] = useState(null);
   const [activeTab, setActiveTab] = useState('log'); // 'log' | 'history'
+  const [activeCategory, setActiveCategory] = useState(null); // Selected category filter/highlight
+
+  // Reset category filter when switching months
+  useEffect(() => {
+    setActiveCategory(null);
+  }, [selectedMonth]);
+
+  // Aggregate category breakdown and total monthly spending
+  const { totalExpense, categoryBreakdown } = useMemo(() => {
+    if (!transactions || transactions.length === 0) {
+      return { totalExpense: 0, categoryBreakdown: [] };
+    }
+
+    const map = {};
+    let total = 0;
+
+    transactions.forEach((tx) => {
+      const amt = Number(tx.amount) || 0;
+      total += amt;
+      const catName = tx.category || '其他';
+      if (!map[catName]) {
+        const meta = getCategoryMeta(catName);
+        map[catName] = {
+          name: catName,
+          emoji: meta.emoji,
+          color: meta.color,
+          amount: 0,
+          count: 0
+        };
+      }
+      map[catName].amount += amt;
+      map[catName].count += 1;
+    });
+
+    const breakdown = Object.values(map)
+      .map((item) => ({
+        ...item,
+        percentage: total > 0 ? (item.amount / total) * 100 : 0,
+        percentageFormatted: total > 0 ? ((item.amount / total) * 100).toFixed(1) : '0.0'
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return { totalExpense: total, categoryBreakdown: breakdown };
+  }, [transactions]);
 
   // Ref to hold the active fetch request's AbortController
   const fetchControllerRef = useRef(null);
@@ -413,13 +621,15 @@ function App() {
               </select>
             </div>
 
-            {/* Monthly Total */}
-            <div className="monthly-total-summary">
-              <span className="total-label">本月累計金額 Total:</span>
-              <span className="total-amount">
-                ${transactions.reduce((sum, tx) => sum + tx.amount, 0).toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-              </span>
-            </div>
+            {/* Monthly Total (shown whenever the chart isn't taking over that role) */}
+            {transactions.length === 0 && (
+              <div className="monthly-total-summary">
+                <span className="total-label">本月累計金額 Total:</span>
+                <span className="total-amount">
+                  ${(0).toLocaleString('zh-TW', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </span>
+              </div>
+            )}
 
             {/* Loading Indicator / Error Message / Empty State / Table */}
             {listLoading && transactions.length === 0 ? (
@@ -451,30 +661,70 @@ function App() {
                     <span>🫙 這個月還沒有記帳記錄喔！</span>
                   </div>
                 ) : (
-                  <div className="transactions-list-wrapper" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                    <table className="transactions-table">
-                      <thead>
-                        <tr>
-                          <th>日期</th>
-                          <th>分類</th>
-                          <th>金額</th>
-                          <th>備註</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {transactions.map((tx, idx) => (
-                          <tr key={idx} className="transaction-row">
-                            <td className="tx-date">{tx.date.substring(5)}</td>
-                            <td className="tx-category">
-                              {CATEGORIES.find(c => c.name === tx.category)?.emoji || '💰'} {tx.category}
-                            </td>
-                            <td className="tx-amount">${tx.amount.toFixed(1)}</td>
-                            <td className="tx-remarks" title={tx.remarks}>{tx.remarks || '-'}</td>
+                  <>
+                    {/* Expense Analytics (Donut Chart & Category Breakdown) */}
+                    <div className="analytics-section">
+                      <ExpenseDonutChart
+                        breakdown={categoryBreakdown}
+                        totalAmount={totalExpense}
+                        activeCategory={activeCategory}
+                        onSelectCategory={setActiveCategory}
+                      />
+                      <CategoryBreakdownList
+                        breakdown={categoryBreakdown}
+                        activeCategory={activeCategory}
+                        onSelectCategory={setActiveCategory}
+                      />
+                    </div>
+
+                    {/* Transactions Section Header */}
+                    <div className="tx-list-header">
+                      <span className="tx-list-title">
+                        📝 消費記錄 {activeCategory ? `• ${activeCategory}` : ''}
+                      </span>
+                      {activeCategory && (
+                        <button 
+                          className="clear-filter-btn"
+                          onClick={() => setActiveCategory(null)}
+                          title="顯示全部記錄"
+                        >
+                          顯示全部 ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Transactions List Table */}
+                    <div className="transactions-list-wrapper">
+                      <table className="transactions-table">
+                        <thead>
+                          <tr>
+                            <th>日期</th>
+                            <th>分類</th>
+                            <th>金額</th>
+                            <th>備註</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {(activeCategory 
+                            ? transactions.filter(tx => (tx.category || '其他') === activeCategory)
+                            : transactions
+                          ).map((tx, idx) => (
+                            <tr 
+                              key={idx} 
+                              className={`transaction-row ${activeCategory && (tx.category || '其他') === activeCategory ? 'filtered-highlight' : ''}`}
+                            >
+                              <td className="tx-date">{tx.date.substring(5)}</td>
+                              <td className="tx-category">
+                                {getCategoryMeta(tx.category).emoji} {tx.category}
+                              </td>
+                              <td className="tx-amount">${Number(tx.amount).toFixed(1)}</td>
+                              <td className="tx-remarks" title={tx.remarks}>{tx.remarks || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </>
             )}

@@ -21,8 +21,8 @@ The system SHALL provide a visual pie chart (or donut chart) and category breakd
 
 #### Scenario: Transaction with unrecognized category
 - **WHEN** a transaction's category does not match any entry in the predefined category list
-- **THEN** the system SHALL group it under a fallback "其他" (Others) color/label in the chart and breakdown instead of failing to render or showing an undefined color.
+- **THEN** the system SHALL render it using a fallback color and icon (matching the "其他" style) while preserving the transaction's original category name, instead of failing to render or showing an undefined color.
 
-#### Scenario: Highlight category on hover or tap
-- **WHEN** the user hovers over or taps a chart segment or a category in the breakdown legend
+#### Scenario: Highlight category on tap
+- **WHEN** the user taps a chart segment or a category in the breakdown legend
 - **THEN** the system SHALL visually highlight the corresponding segment and legend entry together.
