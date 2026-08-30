@@ -9,11 +9,9 @@ servers:
   web:
     - contabo
 
-# No domain yet, so no proxy/ssl block for now.
-# Once a domain is ready, add:
-# proxy:
-#   ssl: true
-#   host: sheeto.yourdomain.com
+proxy:
+  ssl: true
+  host: sheeto.wendylab.fyi
 
 # Credentials for your image host.
 registry:
