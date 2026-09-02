@@ -11,6 +11,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Use Zeabur's optimized static server image
-FROM zeabur/caddy-static
+# Serve the built assets with a plain Caddy static server
+FROM caddy:2-alpine
 COPY --from=build /src/dist /usr/share/caddy
+COPY Caddyfile /etc/caddy/Caddyfile
