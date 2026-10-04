@@ -30,6 +30,49 @@ const getCategoryMeta = (categoryName) => {
   };
 };
 
+// Date conversion helpers between API (yyyy/MM/dd) and HTML input (yyyy-MM-dd)
+const apiDateToInputDate = (apiDate) => {
+  if (!apiDate) return '';
+  return apiDate.replace(/\//g, '-');
+};
+
+const inputDateToApiDate = (inputDate) => {
+  if (!inputDate) return '';
+  return inputDate.replace(/-/g, '/');
+};
+
+// Shared amount input validator/cleaner
+const sanitizeAmount = (val) => {
+  if (/^[0-9]*\.?[0-9]*$/.test(val) && val.length <= 10) {
+    if (val === '') {
+      return '0';
+    } else if (val.startsWith('0') && val.length > 1 && val[1] !== '.') {
+      const stripped = val.replace(/^0+/, '');
+      return stripped || '0';
+    }
+    return val;
+  }
+  return null;
+};
+
+// Reusable category selection grid
+function CategoryPicker({ categories, selectedCategory, onSelectCategory, disabled }) {
+  return (
+    <div className="category-grid">
+      {categories.map((cat) => (
+        <div 
+          key={cat.id} 
+          className={`category-card ${selectedCategory === cat.name ? 'active' : ''} ${disabled ? 'card-disabled' : ''}`}
+          onClick={() => !disabled && onSelectCategory(cat.name)}
+        >
+          <span className="category-emoji">{cat.emoji}</span>
+          <span className="category-name">{cat.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ExpenseDonutChart({ breakdown, totalAmount, activeCategory, onSelectCategory }) {
   const size = 180;
   const strokeWidth = 18;
@@ -200,6 +243,9 @@ function App() {
   // UI state
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: '' }
+  const [mutating, setMutating] = useState(false); // Mutation in-flight lock
+  const [editingTx, setEditingTx] = useState(null); // Active transaction being edited
+  const [confirmDeleteTx, setConfirmDeleteTx] = useState(null); // Transaction pending delete confirmation
 
   // Monthly transactions list states
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -362,18 +408,147 @@ function App() {
 
   // Handle native input change with validation
   const handleInputChange = (e) => {
-    const val = e.target.value;
-    // Allow digits and at most one decimal point, max 10 characters
-    if (/^[0-9]*\.?[0-9]*$/.test(val) && val.length <= 10) {
-      if (val === '') {
-        setAmount('0');
-      } else if (val.startsWith('0') && val.length > 1 && val[1] !== '.') {
-        // Strip leading zeros
-        const stripped = val.replace(/^0+/, '');
-        setAmount(stripped || '0');
+    const sanitized = sanitizeAmount(e.target.value);
+    if (sanitized !== null) {
+      setAmount(sanitized);
+    }
+  };
+
+  // Handle amount change inside Edit Modal
+  const handleEditAmountChange = (e) => {
+    const sanitized = sanitizeAmount(e.target.value);
+    if (sanitized !== null) {
+      setEditingTx(prev => prev ? ({ ...prev, amount: sanitized }) : null);
+    }
+  };
+
+  // Helper to post requests to Google Apps Script Web App
+  const postToGas = async (payload) => {
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain'
+      },
+      body: JSON.stringify({ ...payload, passcode })
+    });
+    return response.json();
+  };
+
+  // Open Edit Modal for a clicked transaction row
+  const handleOpenEditModal = (tx) => {
+    if (mutating) return;
+    if (!Number.isInteger(tx.rowIndex)) {
+      showToast('error', '後端版本過舊，請重新部署 GAS 後再試');
+      return;
+    }
+    setEditingTx({
+      rowIndex: tx.rowIndex,
+      original: {
+        date: tx.date,
+        category: tx.category,
+        amount: tx.amount,
+        remarks: tx.remarks || ''
+      },
+      amount: String(tx.amount),
+      category: tx.category,
+      date: apiDateToInputDate(tx.date),
+      remarks: tx.remarks || ''
+    });
+  };
+
+  // Handle transaction update
+  const handleUpdateTransaction = async () => {
+    if (mutating || !editingTx) return;
+
+    const numericAmount = parseFloat(editingTx.amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      showToast('error', '請輸入有效的金額！');
+      return;
+    }
+    if (!editingTx.category) {
+      showToast('error', '請選擇消費分類！');
+      return;
+    }
+    if (!editingTx.date || !editingTx.date.startsWith('2026-')) {
+      showToast('error', '請選擇 2026 年的有效日期！');
+      return;
+    }
+
+    setMutating(true);
+
+    const updatedApiDate = inputDateToApiDate(editingTx.date);
+    const payload = {
+      action: 'updateTransaction',
+      rowIndex: editingTx.rowIndex,
+      original: editingTx.original,
+      date: updatedApiDate,
+      category: editingTx.category,
+      amount: numericAmount,
+      remarks: (editingTx.remarks || '').trim()
+    };
+
+    try {
+      const result = await postToGas(payload);
+
+      if (result.code === 'CONFLICT') {
+        setEditingTx(null);
+        showToast('error', result.error || '資料已變動，已重新整理，請再試一次');
+        await fetchTransactions(selectedMonthRef.current);
+      } else if (result.success) {
+        setEditingTx(null);
+        const destinationMonth = editingTx.date.substring(0, 7);
+        if (destinationMonth !== selectedMonthRef.current) {
+          showToast('success', `已更新，並移至 ${destinationMonth}`);
+        } else {
+          showToast('success', `記帳已更新：$${numericAmount} [${editingTx.category}]`);
+        }
+        await fetchTransactions(selectedMonthRef.current);
       } else {
-        setAmount(val);
+        showToast('error', `更新失敗：${result.error || '請重試'}`);
       }
+    } catch (err) {
+      console.error(err);
+      showToast('error', '連線失敗，請確認 API 網址或密碼是否正確！');
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  // Handle transaction delete
+  const handleDeleteTransaction = async () => {
+    if (mutating || !confirmDeleteTx) return;
+
+    setMutating(true);
+
+    const payload = {
+      action: 'deleteTransaction',
+      rowIndex: confirmDeleteTx.rowIndex,
+      original: confirmDeleteTx.original
+    };
+
+    try {
+      const result = await postToGas(payload);
+
+      if (result.code === 'CONFLICT') {
+        setConfirmDeleteTx(null);
+        setEditingTx(null);
+        showToast('error', result.error || '資料已變動，已重新整理，請再試一次');
+        await fetchTransactions(selectedMonthRef.current);
+      } else if (result.success) {
+        setConfirmDeleteTx(null);
+        setEditingTx(null);
+        showToast('success', '記錄已成功刪除！');
+        await fetchTransactions(selectedMonthRef.current);
+      } else {
+        setConfirmDeleteTx(null);
+        showToast('error', `刪除失敗：${result.error || '請重試'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setConfirmDeleteTx(null);
+      showToast('error', '連線失敗，請確認 API 網址或密碼是否正確！');
+    } finally {
+      setMutating(false);
     }
   };
 
@@ -381,7 +556,7 @@ function App() {
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (!loading) {
+      if (!loading && !mutating) {
         handleSubmit();
       }
     }
@@ -389,7 +564,7 @@ function App() {
 
   // Submit flow
   const handleSubmit = async () => {
-    if (loading) return;
+    if (loading || mutating) return;
 
     // Basic validation
     const numericAmount = parseFloat(amount);
@@ -429,20 +604,11 @@ function App() {
       date: formattedDate,
       category: selectedCategory,
       amount: numericAmount,
-      remarks: remarks.trim(),
-      passcode: passcode
+      remarks: remarks.trim()
     };
 
     try {
-      const response = await fetch(gasUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
+      const result = await postToGas(payload);
 
       if (result.success) {
         showToast('success', `記帳成功：$${numericAmount} [${selectedCategory}]`);
@@ -560,18 +726,12 @@ function App() {
             {/* Category Grid */}
             <div>
               <div className="section-title">🏷️ 分類 Category</div>
-              <div className="category-grid">
-                {CATEGORIES.map((cat) => (
-                  <div 
-                    key={cat.id} 
-                    className={`category-card ${selectedCategory === cat.name ? 'active' : ''}`}
-                    onClick={() => setSelectedCategory(cat.name)}
-                  >
-                    <span className="category-emoji">{cat.emoji}</span>
-                    <span className="category-name">{cat.name}</span>
-                  </div>
-                ))}
-              </div>
+              <CategoryPicker 
+                categories={CATEGORIES} 
+                selectedCategory={selectedCategory} 
+                onSelectCategory={setSelectedCategory}
+                disabled={loading || mutating}
+              />
             </div>
 
             {/* Remarks Input */}
@@ -583,6 +743,7 @@ function App() {
                 className="remarks-input"
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
+                disabled={loading || mutating}
               />
             </div>
           </main>
@@ -591,7 +752,7 @@ function App() {
           <button 
             className="submit-btn" 
             onClick={handleSubmit} 
-            disabled={loading || amount === '0' || !selectedCategory}
+            disabled={loading || mutating || amount === '0' || !selectedCategory}
           >
             {loading ? <div className="spinner" /> : '✓ 送出此筆記帳 Submit'}
           </button>
@@ -681,6 +842,7 @@ function App() {
                     <div className="tx-list-header">
                       <span className="tx-list-title">
                         📝 消費記錄 {activeCategory ? `• ${activeCategory}` : ''}
+                        <span className="tx-list-hint">(點擊可編輯/刪除)</span>
                       </span>
                       {activeCategory && (
                         <button 
@@ -710,8 +872,10 @@ function App() {
                             : transactions
                           ).map((tx, idx) => (
                             <tr 
-                              key={idx} 
-                              className={`transaction-row ${activeCategory && (tx.category || '其他') === activeCategory ? 'filtered-highlight' : ''}`}
+                              key={tx.rowIndex ?? idx} 
+                              className={`transaction-row tappable ${activeCategory && (tx.category || '其他') === activeCategory ? 'filtered-highlight' : ''} ${mutating ? 'row-disabled' : ''}`}
+                              onClick={() => !mutating && handleOpenEditModal(tx)}
+                              title="點擊以編輯或刪除此筆記錄"
                             >
                               <td className="tx-date">{tx.date.substring(5)}</td>
                               <td className="tx-category">
@@ -795,6 +959,170 @@ function App() {
                 確認並儲存 Save
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal Dialog Overlay */}
+      {editingTx && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel animate-pop-in">
+            <div className="modal-header">
+              <h3 className="modal-title">✏️ 編輯記帳 Edit</h3>
+              <button 
+                className="modal-close" 
+                onClick={() => !mutating && setEditingTx(null)}
+                disabled={mutating}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {/* Amount Display & Input */}
+              <div className="form-group">
+                <label className="form-label">💵 金額 Amount</label>
+                <div className="amount-value-wrapper edit-amount-wrapper">
+                  <span className="amount-currency">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*\.?[0-9]*"
+                    className="amount-input-field edit-amount-input"
+                    value={editingTx.amount === '0' ? '' : editingTx.amount}
+                    placeholder="0"
+                    onChange={handleEditAmountChange}
+                    disabled={mutating}
+                  />
+                </div>
+              </div>
+
+              {/* Date Selector */}
+              <div className="form-group">
+                <label className="form-label">📅 日期 Date</label>
+                <input 
+                  type="date" 
+                  min="2026-01-01" 
+                  max="2026-12-31" 
+                  className="custom-date-picker" 
+                  value={editingTx.date}
+                  onChange={(e) => setEditingTx(prev => prev ? ({ ...prev, date: e.target.value }) : null)}
+                  disabled={mutating}
+                />
+              </div>
+
+              {/* Category Picker */}
+              <div className="form-group">
+                <label className="form-label">🏷️ 分類 Category</label>
+                <CategoryPicker 
+                  categories={CATEGORIES} 
+                  selectedCategory={editingTx.category} 
+                  onSelectCategory={(catName) => setEditingTx(prev => prev ? ({ ...prev, category: catName }) : null)}
+                  disabled={mutating}
+                />
+              </div>
+
+              {/* Remarks Input */}
+              <div className="form-group">
+                <label className="form-label">✍️ 備註 Remarks (選填)</label>
+                <input 
+                  type="text" 
+                  placeholder="例如：午餐麥當勞、飲料..." 
+                  className="remarks-input"
+                  value={editingTx.remarks}
+                  onChange={(e) => setEditingTx(prev => prev ? ({ ...prev, remarks: e.target.value }) : null)}
+                  disabled={mutating}
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="modal-actions-bar">
+              <button 
+                type="button" 
+                className="btn-danger-outline"
+                onClick={() => !mutating && setConfirmDeleteTx(editingTx)}
+                disabled={mutating}
+              >
+                🗑️ 刪除
+              </button>
+              <div className="modal-actions-right">
+                <button 
+                  type="button" 
+                  className="btn-secondary"
+                  onClick={() => !mutating && setEditingTx(null)}
+                  disabled={mutating}
+                >
+                  取消
+                </button>
+                <button 
+                  type="button" 
+                  className="btn-primary"
+                  onClick={handleUpdateTransaction}
+                  disabled={mutating || editingTx.amount === '0' || !editingTx.category}
+                >
+                  {mutating && !confirmDeleteTx ? <div className="spinner" /> : '✓ 儲存變更'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog Overlay */}
+      {confirmDeleteTx && (
+        <div className="modal-overlay delete-confirm-overlay">
+          <div className="modal-content delete-confirm-modal glass-panel animate-pop-in">
+            <div className="modal-header">
+              <h3 className="modal-title delete-title">⚠️ 確定刪除這筆記帳？</h3>
+            </div>
+            <div className="delete-confirm-body">
+              <p className="delete-warning-text">
+                刪除後資料將自 Google 試算表中移除。請確認以下記帳內容：
+              </p>
+              <div className="delete-tx-summary glass-panel">
+                <div className="delete-summary-row">
+                  <span className="summary-label">日期：</span>
+                  <span className="summary-val">{confirmDeleteTx.original.date}</span>
+                </div>
+                <div className="delete-summary-row">
+                  <span className="summary-label">分類：</span>
+                  <span className="summary-val">
+                    {getCategoryMeta(confirmDeleteTx.original.category).emoji} {confirmDeleteTx.original.category}
+                  </span>
+                </div>
+                <div className="delete-summary-row">
+                  <span className="summary-label">金額：</span>
+                  <span className="summary-val amount-highlight">
+                    ${Number(confirmDeleteTx.original.amount).toFixed(1)}
+                  </span>
+                </div>
+                {confirmDeleteTx.original.remarks && (
+                  <div className="delete-summary-row">
+                    <span className="summary-label">備註：</span>
+                    <span className="summary-val">{confirmDeleteTx.original.remarks}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="modal-actions-bar delete-actions-bar">
+              <button 
+                type="button" 
+                className="btn-secondary"
+                onClick={() => !mutating && setConfirmDeleteTx(null)}
+                disabled={mutating}
+              >
+                取消
+              </button>
+              <button 
+                type="button" 
+                className="btn-danger"
+                onClick={handleDeleteTransaction}
+                disabled={mutating}
+              >
+                {mutating ? <div className="spinner" /> : '確認刪除 Confirm'}
+              </button>
+            </div>
           </div>
         </div>
       )}

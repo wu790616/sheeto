@@ -125,6 +125,113 @@ function getColumnLetter(colIndex) {
 }
 
 /**
+ * Parse and validate a date string in yyyy/MM/dd format.
+ * Ensures the date is a real calendar date in the year 2026.
+ */
+function parseDate(dateStr) {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const match = dateStr.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  if (year !== 2026) return null; // Sheet is year-specific (2026)
+  if (month < 1 || month > 12) return null;
+  const dateObj = new Date(year, month - 1, day);
+  if (
+    dateObj.getFullYear() !== year ||
+    dateObj.getMonth() !== month - 1 ||
+    dateObj.getDate() !== day
+  ) {
+    return null;
+  }
+  return dateObj;
+}
+
+/**
+ * Validate transaction fields (date, category, amount).
+ * Returns { valid: true, parsedDate, amount } or { valid: false, error }.
+ */
+function validateTransactionFields(dateStr, category, amount) {
+  const parsedDate = parseDate(dateStr);
+  if (!parsedDate) {
+    return { valid: false, error: "無效的日期格式，請使用 2026 年的 yyyy/MM/dd 格式。" };
+  }
+  if (!category || CATEGORIES_LIST.indexOf(category) === -1) {
+    return { valid: false, error: "無效的消費分類。" };
+  }
+  const numAmount = parseFloat(amount);
+  if (isNaN(numAmount) || numAmount <= 0 || !isFinite(numAmount)) {
+    return { valid: false, error: "金額必須為大於 0 的數值。" };
+  }
+  return { valid: true, parsedDate: parsedDate, amount: numAmount };
+}
+
+/**
+ * Normalize a sheet row [date, category, amount, remarks] using the same logic as getTransactions.
+ */
+function normalizeRow(row, tz) {
+  let dateObj = row[0];
+  if (dateObj && !(dateObj instanceof Date)) {
+    dateObj = new Date(dateObj);
+  }
+  const dateStr = (dateObj instanceof Date && !isNaN(dateObj.getTime()))
+    ? Utilities.formatDate(dateObj, tz, "yyyy/MM/dd")
+    : "";
+  return {
+    date: dateStr,
+    category: row[1] !== undefined && row[1] !== null ? row[1].toString().trim() : "",
+    amount: parseFloat(row[2]) || 0,
+    remarks: row[3] !== undefined && row[3] !== null ? row[3].toString().trim() : ""
+  };
+}
+
+/**
+ * Validate target row bounds and verify optimistic concurrency check against original values.
+ */
+function validateRowTarget(sheet, rowIndex, original, tz) {
+  if (!Number.isInteger(rowIndex) || rowIndex < 2 || rowIndex > sheet.getLastRow()) {
+    return {
+      valid: false,
+      response: createJsonResponse({ success: false, error: "Bad Request: Invalid or out-of-bounds rowIndex." })
+    };
+  }
+  if (!original || typeof original !== "object" || !original.date || original.category === undefined || original.amount === undefined) {
+    return {
+      valid: false,
+      response: createJsonResponse({ success: false, error: "Bad Request: Missing original transaction values for concurrency check." })
+    };
+  }
+  const currentRowValues = sheet.getRange(rowIndex, 1, 1, 4).getValues()[0];
+  const currentRowNorm = normalizeRow(currentRowValues, tz);
+
+  const origAmount = parseFloat(original.amount) || 0;
+  const origRemarks = original.remarks !== undefined && original.remarks !== null ? original.remarks.toString().trim() : "";
+  const origCategory = original.category ? original.category.toString().trim() : "";
+  const origDate = original.date ? original.date.toString().trim() : "";
+
+  const isMatch = (
+    currentRowNorm.date === origDate &&
+    currentRowNorm.category === origCategory &&
+    Math.abs(currentRowNorm.amount - origAmount) < 0.001 &&
+    currentRowNorm.remarks === origRemarks
+  );
+
+  if (!isMatch) {
+    return {
+      valid: false,
+      response: createJsonResponse({
+        success: false,
+        code: "CONFLICT",
+        error: "資料已變動，已重新整理，請再試一次"
+      })
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Handle GET requests from the mobile client
  */
 function doGet(e) {
@@ -177,6 +284,7 @@ function doGet(e) {
           const rowMonth = Utilities.formatDate(dateObj, tz, "yyyy-MM");
           if (rowMonth === month) {
             transactions.push({
+              rowIndex: i + 2,
               date: Utilities.formatDate(dateObj, tz, "yyyy/MM/dd"),
               category: row[1],
               amount: parseFloat(row[2]) || 0,
@@ -200,45 +308,95 @@ function doGet(e) {
  * Handle POST requests from the mobile client
  */
 function doPost(e) {
+  let lock = null;
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return createJsonResponse({ success: false, error: "Bad Request: Missing request body." });
+    }
     // Parse input data
     const payload = JSON.parse(e.postData.contents);
-    const dateStr = payload.date; // "yyyy/MM/dd"
-    const category = payload.category;
-    const amount = parseFloat(payload.amount);
-    const remarks = payload.remarks || "";
     const passcode = payload.passcode;
     
-    // 1. Validate passcode
+    // 1. Validate passcode first
     const systemPasscode = PropertiesService.getScriptProperties().getProperty("PASSCODE");
     if (!systemPasscode) {
-      return createJsonResponse({ success: false, error: "System passcode is not configured in Script Properties." }, 500);
+      return createJsonResponse({ success: false, error: "System passcode is not configured in Script Properties." });
     }
     if (passcode !== systemPasscode) {
-      return createJsonResponse({ success: false, error: "Unauthorized: Invalid passcode." }, 401);
+      return createJsonResponse({ success: false, error: "Unauthorized: Invalid passcode." });
     }
-    
-    // 2. Validate parameters
-    if (!dateStr || !category || isNaN(amount)) {
-      return createJsonResponse({ success: false, error: "Bad Request: Missing required parameters." }, 400);
+
+    const action = payload.action;
+
+    // 2. Strict action dispatch: absent or createTransaction -> create; updateTransaction -> update; deleteTransaction -> delete; else reject
+    if (action && action !== "createTransaction" && action !== "updateTransaction" && action !== "deleteTransaction") {
+      return createJsonResponse({ success: false, error: "Bad Request: Invalid action." });
     }
-    
-    // 3. Append row to sheet
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
     if (!logSheet) {
-      return createJsonResponse({ success: false, error: "Sheet '" + LOG_SHEET_NAME + "' not found. Run setupSheet() first." }, 500);
+      return createJsonResponse({ success: false, error: "Sheet '" + LOG_SHEET_NAME + "' not found. Run setupSheet() first." });
     }
-    
-    // Format date string to Date object to ensure Google Sheets parses it correctly
-    const dateParts = dateStr.split("/");
-    const parsedDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-    
-    logSheet.appendRow([parsedDate, category, amount, remarks]);
-    
-    return createJsonResponse({ success: true, message: "Transaction logged successfully." }, 200);
+    const tz = Session.getScriptTimeZone();
+
+    // 3. Acquire script lock for all writes (10s timeout)
+    lock = LockService.getScriptLock();
+    const hasLock = lock.tryLock(10000);
+    if (!hasLock) {
+      return createJsonResponse({ success: false, error: "伺服器忙碌中，請稍後重試 (Lock timeout)" });
+    }
+
+    // 4. Handle Create (Action absent or createTransaction)
+    if (!action || action === "createTransaction") {
+      const fieldVal = validateTransactionFields(payload.date, payload.category, payload.amount);
+      if (!fieldVal.valid) {
+        return createJsonResponse({ success: false, error: fieldVal.error });
+      }
+      const remarks = payload.remarks !== undefined && payload.remarks !== null ? payload.remarks.toString().trim() : "";
+      logSheet.appendRow([fieldVal.parsedDate, payload.category, fieldVal.amount, remarks]);
+      return createJsonResponse({ success: true, message: "Transaction logged successfully." });
+    }
+
+    // 5. Handle Update
+    if (action === "updateTransaction") {
+      const rowIndex = payload.rowIndex;
+      const targetCheck = validateRowTarget(logSheet, rowIndex, payload.original, tz);
+      if (!targetCheck.valid) {
+        return targetCheck.response;
+      }
+
+      const fieldVal = validateTransactionFields(payload.date, payload.category, payload.amount);
+      if (!fieldVal.valid) {
+        return createJsonResponse({ success: false, error: fieldVal.error });
+      }
+      const remarks = payload.remarks !== undefined && payload.remarks !== null ? payload.remarks.toString().trim() : "";
+      logSheet.getRange(rowIndex, 1, 1, 4).setValues([[fieldVal.parsedDate, payload.category, fieldVal.amount, remarks]]);
+      return createJsonResponse({ success: true, message: "Transaction updated successfully." });
+    }
+
+    // 6. Handle Delete
+    if (action === "deleteTransaction") {
+      const rowIndex = payload.rowIndex;
+      const targetCheck = validateRowTarget(logSheet, rowIndex, payload.original, tz);
+      if (!targetCheck.valid) {
+        return targetCheck.response;
+      }
+      logSheet.deleteRow(rowIndex);
+      return createJsonResponse({ success: true, message: "Transaction deleted successfully." });
+    }
+
+    return createJsonResponse({ success: false, error: "Bad Request: Unhandled action." });
   } catch (err) {
-    return createJsonResponse({ success: false, error: err.toString() }, 500);
+    return createJsonResponse({ success: false, error: err.toString() });
+  } finally {
+    if (lock) {
+      try {
+        lock.releaseLock();
+      } catch (releaseErr) {
+        // ignore release error
+      }
+    }
   }
 }
 
