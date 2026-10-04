@@ -24,8 +24,12 @@ The system SHALL validate the passcode of every POST request before inspecting i
 - **WHEN** a POST request is received with a valid passcode, no `action` field, and valid `date`, `category`, and `amount`
 - **THEN** the system SHALL append a new transaction row, preserving the existing create behavior.
 
+#### Scenario: POST with createTransaction action creates a transaction
+- **WHEN** a POST request is received with a valid passcode, `action=createTransaction`, and valid `date`, `category`, and `amount`
+- **THEN** the system SHALL append a new transaction row, identical to a POST without an `action` field.
+
 #### Scenario: POST with unknown action is rejected
-- **WHEN** a POST request is received with a valid passcode and an `action` value other than `updateTransaction` or `deleteTransaction`
+- **WHEN** a POST request is received with a valid passcode and an `action` value other than `createTransaction`, `updateTransaction`, or `deleteTransaction`
 - **THEN** the system SHALL return an invalid action error and SHALL NOT modify the sheet.
 
 #### Scenario: POST with invalid passcode is rejected regardless of action

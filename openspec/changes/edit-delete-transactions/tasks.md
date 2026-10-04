@@ -2,7 +2,7 @@
 
 - [x] 1.1 In `gas/Code.js` `doGet(e)`, include `rowIndex` (`i + 2`) in each transaction object returned by `getTransactions`.
 - [x] 1.2 In `gas/Code.js`, extract shared helpers: `parseDate` (validates `yyyy/MM/dd`, real calendar date, year 2026), `validateTransactionFields` (date, `amount > 0`, `category` in `CATEGORIES_LIST`), and `normalizeRow` (same date/amount/remarks normalization as `getTransactions`).
-- [x] 1.3 Restructure `doPost(e)`: validate passcode first, then dispatch on `action` — absent → create, `updateTransaction` → update, `deleteTransaction` → delete, anything else → `Bad Request: Invalid action.` with no write. Make the create path use the shared validation and date parsing.
+- [x] 1.3 Restructure `doPost(e)`: validate passcode first, then dispatch on `action` — absent or `createTransaction` → create, `updateTransaction` → update, `deleteTransaction` → delete, anything else → `Bad Request: Invalid action.` with no write. Make the create path use the shared validation and date parsing.
 - [x] 1.4 Wrap all writes (create, update, delete) in `LockService.getScriptLock()` with a ~10s `waitLock`, releasing in `finally`; return a retryable error if the lock cannot be acquired.
 - [x] 1.5 Implement a `validateRowTarget(sheet, rowIndex, original)` helper: require integer `rowIndex` with `2 <= rowIndex <= lastRow`, require `original` with all four fields, and compare `normalizeRow` of the current row against `original`, returning `{ success: false, code: "CONFLICT" }` on mismatch.
 - [x] 1.6 Implement `updateTransaction`: validate new fields, run `validateRowTarget` inside the lock, then write columns A–D via `getRange(rowIndex, 1, 1, 4).setValues(...)`.

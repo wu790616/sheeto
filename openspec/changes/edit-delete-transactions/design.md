@@ -39,6 +39,7 @@ This change extends Sheeto to support updating and deleting transactions directl
 - **Decision**: **Option B (`POST` with action payload)**. Google Apps Script Web Apps only implement `doGet(e)` and `doPost(e)`. Dispatching via an `action` field in the POST request body is the standard Apps Script pattern.
 - **Dispatch rules** (evaluated after passcode validation):
   - `action` absent → existing create/append behavior (backwards compatible).
+  - `action === "createTransaction"` → the same create behavior, giving create an explicit name alongside the other actions.
   - `action === "updateTransaction"` → update handler.
   - `action === "deleteTransaction"` → delete handler.
   - Any other `action` value → `Bad Request: Invalid action.`, no write. This prevents a misspelled action carrying date/category/amount from silently appending a duplicate row.

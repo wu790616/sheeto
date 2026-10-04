@@ -6,7 +6,7 @@ Currently, once an expense entry is submitted, users have no way to modify or de
 
 - **Backend (GAS API)**:
   - Enrich `getTransactions` response so each transaction record includes a row identifier (`rowIndex`) referencing its position in the `2026記帳明細` sheet.
-  - Restructure `doPost` to validate the passcode first, then dispatch strictly by `action`: absent → create (existing behavior), `updateTransaction` / `deleteTransaction` → mutation handlers, any other value → rejected without writing.
+  - Restructure `doPost` to validate the passcode first, then dispatch strictly by `action`: absent or `createTransaction` → create (absent keeps existing clients working), `updateTransaction` / `deleteTransaction` → mutation handlers, any other value → rejected without writing.
   - Add `updateTransaction` to modify Date, Category, Amount, and Remarks of a specified row.
   - Add `deleteTransaction` to delete a specified row from `2026記帳明細`.
   - Guard every mutation with an **optimistic concurrency check**: the client sends the row's original values alongside `rowIndex`, and the backend refuses to write if the row's current contents no longer match (protects against row index drift).
