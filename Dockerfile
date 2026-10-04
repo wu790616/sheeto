@@ -1,4 +1,6 @@
-FROM node:22-slim AS build
+# Build natively on the host arch: the output is static files, and esbuild
+# crashes under QEMU when cross-building amd64 on Apple Silicon
+FROM --platform=$BUILDPLATFORM node:22-slim AS build
 LABEL "language"="nodejs"
 LABEL "framework"="vite"
 WORKDIR /src
